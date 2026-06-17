@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0b0c10"/>
+  <rect x="56" y="56" width="400" height="400" rx="92" fill="#c9f24d"/>
+  <g fill="#11140a">
+    <!-- stylised "M" / music mark -->
+    <path d="M150 360 V152 h44 l62 96 62-96 h44 v208 h-46 V236 l-60 92 -60-92 v124 z"/>
+  </g>
+</svg>
