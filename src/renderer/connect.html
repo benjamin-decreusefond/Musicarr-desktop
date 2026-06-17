@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self'; script-src 'self'; img-src data:; connect-src 'self';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connect to Musicarr</title>
+  <link rel="stylesheet" href="connect.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="card">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">M</div>
+        <div class="brand-text">
+          <h1>Musicarr</h1>
+          <p>Desktop</p>
+        </div>
+      </div>
+
+      <p class="lead">Connect to your Musicarr server to browse, download and listen to your library.</p>
+
+      <div id="banner" class="banner" hidden></div>
+
+      <form id="connect-form" autocomplete="off">
+        <label for="server">Server address</label>
+        <div class="field">
+          <input id="server" name="server" type="text" inputmode="url" spellcheck="false"
+                 placeholder="https://musicarr.example.com" autofocus />
+        </div>
+        <button id="connect-btn" type="submit" class="primary">Connect</button>
+        <p id="status" class="status" role="status"></p>
+      </form>
+
+      <div id="recents" class="recents" hidden>
+        <h2>Recent servers</h2>
+        <ul id="recents-list"></ul>
+      </div>
+    </section>
+    <footer class="foot">Your sign-in stays on this device. The desktop app only ever talks to the server you choose.</footer>
+  </main>
+
+  <script src="connect.js"></script>
+</body>
+</html>

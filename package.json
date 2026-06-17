@@ -1,0 +1,58 @@
+{
+  "name": "musicarr-desktop",
+  "version": "1.0.0",
+  "description": "Desktop client for a self-hosted Musicarr music server. Connects to a remote Musicarr server and exposes its full web experience in a native window with media-key, tray and multi-server support.",
+  "author": "benjamin-decreusefond",
+  "license": "MIT",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/menu.js && node --check src/store.js && node --check src/renderer/connect.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ovh.bigbossben.musicarr.desktop",
+    "productName": "Musicarr",
+    "copyright": "Copyright © 2026 benjamin-decreusefond",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "Musicarr-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Musicarr"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.music"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Audio"
+    }
+  }
+}
