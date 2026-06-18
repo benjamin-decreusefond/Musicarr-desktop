@@ -7,7 +7,7 @@
 const { Menu, shell, dialog } = require('electron');
 
 function buildAppMenu(ctx) {
-  const { app, window, store, isConnected, onDisconnect, onReload, onZoom, onConnectTo } = ctx;
+  const { app, window, store, isConnected, onDisconnect, onReload, onZoom, onConnectTo, onCheckForUpdates } = ctx;
   const isMac = process.platform === 'darwin';
 
   const recents = (store.get('servers') || []).map((s) => ({
@@ -81,6 +81,11 @@ function buildAppMenu(ctx) {
     {
       role: 'help',
       submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => { if (onCheckForUpdates) onCheckForUpdates(); },
+        },
+        { type: 'separator' },
         {
           label: 'Musicarr on GitHub',
           click: () => shell.openExternal('https://github.com/benjamin-decreusefond/musicarr'),
