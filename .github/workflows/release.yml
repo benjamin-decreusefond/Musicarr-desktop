@@ -1,0 +1,59 @@
+name: release
+
+# Cut a downloadable Windows installer.
+#
+# Trigger by pushing a version tag, e.g.:
+#   npm version patch        # bumps package.json + creates the tag
+#   git push --follow-tags
+# or run this workflow manually (Actions → release → Run workflow) and give it a
+# tag like v1.0.1.
+#
+# The job builds Musicarr-Setup-<version>.exe and publishes it to a GitHub
+# Release for the tag, so end users can download the installer directly from the
+# repo's Releases page — no Actions login or artifact digging required.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v1.0.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci || npm install
+
+      - name: Build Windows installer
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish installer to a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Use the pushed tag, or the tag typed into the manual run.
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Musicarr Desktop ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

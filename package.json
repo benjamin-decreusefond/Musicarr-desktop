@@ -11,10 +11,10 @@
     "dev": "electron . --dev",
     "lint": "node --check src/main.js && node --check src/preload.js && node --check src/menu.js && node --check src/store.js && node --check src/renderer/connect.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -28,6 +28,13 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "benjamin-decreusefond",
+        "repo": "Musicarr-desktop"
+      }
+    ],
     "files": [
       "src/**/*",
       "package.json"
