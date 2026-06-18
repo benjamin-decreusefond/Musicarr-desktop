@@ -31,6 +31,7 @@ On top of the web app it adds the things a browser tab can't:
 | **Connect screen** | Pick/enter a server URL; validates it against the server's `/health` endpoint before connecting. |
 | **Multi-server** | Remembers recent servers; one-click reconnect and a **Server → Switch server** menu (`Ctrl+Shift+S`). |
 | **Auto-reconnect** | Reopens your last server on launch (falls back to the picker if it's unreachable). |
+| **Auto-update** | Checks GitHub Releases, downloads new versions in the background (differential) and installs on restart — no re-downloading installers. |
 | **Persistent login** | Uses the same cookie session as the web app, kept in the app's own profile, so you stay signed in across restarts. |
 | **Media keys** | Hardware play/pause/next/previous keys drive playback via the web app's Media Session integration. |
 | **Window state** | Remembers window size/position and zoom level. |
@@ -50,6 +51,25 @@ On top of the web app it adds the things a browser tab can't:
 
 Switching servers (or signing into a different one) is **Server → Switch
 server** in the menu, or `Ctrl+Shift+S`.
+
+## Auto-update
+
+The installed app keeps **itself** up to date — no re-downloading installers.
+Powered by [`electron-updater`](https://www.electron.build/auto-update):
+
+- On launch and every few hours it checks the repo's GitHub Releases for a newer
+  version (anonymously — the repo is public), reading the `latest.yml` the
+  release workflow publishes.
+- A new version downloads in the background, **differentially** (only the changed
+  blocks, via the `.blockmap`), then prompts **Restart now / Later**. On restart
+  it installs silently — no NSIS wizard.
+- You can also trigger a check from **Help → Check for Updates…**.
+
+Auto-update only runs in the installed app; in dev (`npm start`) it's a no-op.
+Because the release pipeline already attaches `latest.yml`/`.blockmap` to every
+release, **publishing a new version is all it takes** for existing installs to
+pick it up. (Windows auto-update works even though the build is unsigned; signing
+would only remove the first-install SmartScreen prompt.)
 
 ## Security model
 

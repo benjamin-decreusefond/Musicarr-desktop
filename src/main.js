@@ -11,6 +11,7 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, shell, net, Tray, Menu, nativeImage } = require('electron');
 const { Store } = require('./store');
 const { buildAppMenu } = require('./menu');
+const { initAutoUpdates, checkForUpdates } = require('./updater');
 
 const CONNECT_PAGE = path.join(__dirname, 'renderer', 'connect.html');
 const PRELOAD = path.join(__dirname, 'preload.js');
@@ -227,6 +228,7 @@ function refreshMenu() {
       store.set('zoomFactor', factor);
     },
     onConnectTo: (url) => loadServer(url),
+    onCheckForUpdates: () => checkForUpdates({ silent: false }),
   });
   Menu.setApplicationMenu(menu);
 }
@@ -302,6 +304,7 @@ if (!gotLock) {
     createWindow();
     refreshMenu();
     createTray();
+    initAutoUpdates();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
