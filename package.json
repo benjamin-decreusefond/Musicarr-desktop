@@ -1,6 +1,6 @@
 {
   "name": "musicarr-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop client for a self-hosted Musicarr music server. Connects to a remote Musicarr server and exposes its full web experience in a native window with media-key, tray and multi-server support.",
   "author": "benjamin-decreusefond",
   "license": "MIT",
@@ -41,7 +41,12 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Musicarr-Setup-${version}.${ext}"
     },
@@ -54,11 +59,15 @@
       "shortcutName": "Musicarr"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.music"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Audio"
     }
   }
