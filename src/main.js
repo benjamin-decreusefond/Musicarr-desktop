@@ -2,23 +2,32 @@
 
 // Musicarr Desktop — a thin, native Electron shell around a remote Musicarr
 // server's web app. The renderer that actually talks to Deezer/Soulseek/etc is
-// the server's own React UI: we just point a hardened BrowserWindow at the
-// chosen server origin (same-origin cookies = the web login persists) and add
-// the things a browser tab can't give you — a server picker, window-state
-// persistence, a tray, native menus and hardware media-key playback control.
+// the server's own React UI: we point a hardened WebContentsView at the chosen
+// server origin (same-origin cookies = the web login persists) and add the
+// things a browser tab can't give you — a server picker, a slim custom title
+// bar with an in-app "Switch server" control, window-state persistence, a tray,
+// hardware media-key playback and auto-update.
+//
+// Layout: the BrowserWindow is frameless. Its own webContents renders the slim
+// custom title bar (top TITLEBAR_H px); a child WebContentsView holds the actual
+// app content below it, so the title bar never overlaps the web UI.
 
 const path = require('path');
-const { app, BrowserWindow, ipcMain, shell, net, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, net, Tray, Menu, nativeImage } = require('electron');
 const { Store } = require('./store');
 const { buildAppMenu } = require('./menu');
 const { initAutoUpdates, checkForUpdates } = require('./updater');
 
 const CONNECT_PAGE = path.join(__dirname, 'renderer', 'connect.html');
+const TITLEBAR_PAGE = path.join(__dirname, 'renderer', 'titlebar.html');
 const PRELOAD = path.join(__dirname, 'preload.js');
+const TITLEBAR_PRELOAD = path.join(__dirname, 'titlebar-preload.js');
 const HEALTH_TIMEOUT_MS = 8000;
+const TITLEBAR_H = 36;
 
 let store;
-let mainWindow = null;
+let mainWindow = null;   // frameless window; its webContents = the title bar
+let contentView = null;  // WebContentsView holding the connect screen / server app
 let tray = null;
 // The origin we currently consider "in-app". Null while on the connect screen.
 let currentOrigin = null;
@@ -101,56 +110,87 @@ function createWindow() {
     minHeight: 540,
     backgroundColor: '#0b0c10',
     show: false,
-    autoHideMenuBar: false,
+    frame: false,            // custom title bar (see titlebar.html)
     title: 'Musicarr',
     webPreferences: {
+      // The window's own page is the local, trusted title bar.
+      preload: TITLEBAR_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  // The title bar lives in the window's root webContents.
+  mainWindow.loadFile(TITLEBAR_PAGE);
+  mainWindow.webContents.on('did-finish-load', () => updateTitlebar());
+  // The title bar is local; never let it navigate away or open windows.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  // The actual app content (connect screen / remote server) lives below the bar.
+  contentView = new WebContentsView({
+    webPreferences: {
       preload: PRELOAD,
-      // Remote server content is untrusted web content: keep it fully sandboxed
-      // with no Node access. The preload only bridges a tiny, safe config API.
+      // Remote server content is untrusted: keep it fully sandboxed with no Node
+      // access. The preload only bridges a tiny, safe config API.
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
     },
   });
+  mainWindow.contentView.addChildView(contentView);
+  layout();
 
+  const cv = contentView.webContents;
   const savedZoom = store.get('zoomFactor');
   if (savedZoom) {
-    mainWindow.webContents.on('did-finish-load', () => {
-      mainWindow.webContents.setZoomFactor(savedZoom);
-    });
+    cv.on('did-finish-load', () => cv.setZoomFactor(savedZoom));
   }
-
-  mainWindow.once('ready-to-show', () => mainWindow.show());
-
-  // Persist size/position so we reopen where the user left off.
-  const persistBounds = () => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
-      store.set('windowBounds', mainWindow.getBounds());
-    }
-  };
-  mainWindow.on('resize', persistBounds);
-  mainWindow.on('move', persistBounds);
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
 
   // Open links to anywhere other than the connected server in the user's real
   // browser, and never let the app spawn extra Electron windows.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  cv.setWindowOpenHandler(({ url }) => {
     openExternalIfSafe(url);
     return { action: 'deny' };
   });
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  cv.on('will-navigate', (event, url) => {
     if (isInAppUrl(url)) return; // staying inside the server app — allow
     event.preventDefault();
     openExternalIfSafe(url);
   });
 
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // Persist size/position so we reopen where the user left off; keep the content
+  // view sized to fill the area below the title bar.
+  const persistBounds = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+      store.set('windowBounds', mainWindow.getBounds());
+    }
+  };
+  mainWindow.on('resize', () => { layout(); persistBounds(); });
+  mainWindow.on('move', persistBounds);
+  mainWindow.on('maximize', () => updateTitlebar());
+  mainWindow.on('unmaximize', () => updateTitlebar());
+  mainWindow.on('enter-full-screen', () => updateTitlebar());
+  mainWindow.on('leave-full-screen', () => updateTitlebar());
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    contentView = null;
+  });
+
   // Decide what to show first: auto-reconnect to the last server if it's up,
   // otherwise fall back to the connect screen.
   bootstrap();
+}
+
+// Size the content view to fill everything below the title bar.
+function layout() {
+  if (!mainWindow || mainWindow.isDestroyed() || !contentView) return;
+  const [w, h] = mainWindow.getContentSize();
+  contentView.setBounds({ x: 0, y: TITLEBAR_H, width: w, height: Math.max(0, h - TITLEBAR_H) });
 }
 
 async function bootstrap() {
@@ -167,10 +207,11 @@ async function bootstrap() {
 
 function showConnectScreen(message) {
   currentOrigin = null;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!contentView) return;
   const query = message ? `?message=${encodeURIComponent(message)}` : '';
-  mainWindow.loadFile(CONNECT_PAGE, query ? { search: query } : undefined);
-  mainWindow.setTitle('Musicarr');
+  contentView.webContents.loadFile(CONNECT_PAGE, query ? { search: query } : undefined);
+  if (mainWindow) mainWindow.setTitle('Musicarr');
+  updateTitlebar();
   refreshMenu();
 }
 
@@ -184,12 +225,13 @@ function loadServer(rawUrl) {
   }
   currentOrigin = origin;
   store.rememberServer(origin, hostLabel(origin));
-  mainWindow.loadURL(origin);
-  mainWindow.setTitle(`Musicarr — ${hostLabel(origin)}`);
+  contentView.webContents.loadURL(origin);
+  if (mainWindow) mainWindow.setTitle(`Musicarr — ${hostLabel(origin)}`);
+  updateTitlebar();
   refreshMenu();
 
   // If the server origin itself can't be loaded, bounce back to the picker.
-  mainWindow.webContents.once('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
+  contentView.webContents.once('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
     if (isMainFrame && currentOrigin && failedUrl.startsWith(currentOrigin)) {
       showConnectScreen(`Couldn't load ${hostLabel(origin)} (${desc || code}).`);
     }
@@ -210,10 +252,23 @@ function openExternalIfSafe(url) {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
 }
 
+// Push the current connection/window state to the title bar renderer.
+function updateTitlebar() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('titlebar:state', {
+    connected: !!currentOrigin,
+    host: currentOrigin ? hostLabel(currentOrigin) : '',
+    maximized: mainWindow.isMaximized(),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Menu / tray wiring
 // ---------------------------------------------------------------------------
 
+// The application menu is kept (hidden, since the window is frameless) purely so
+// its keyboard accelerators keep working; the visible controls are the custom
+// title bar and the tray.
 function refreshMenu() {
   const menu = buildAppMenu({
     app,
@@ -221,10 +276,10 @@ function refreshMenu() {
     store,
     isConnected: !!currentOrigin,
     onDisconnect: () => showConnectScreen(),
-    onReload: () => { if (mainWindow) mainWindow.webContents.reload(); },
+    onReload: () => { if (contentView) contentView.webContents.reload(); },
     onZoom: (factor) => {
-      if (!mainWindow) return;
-      mainWindow.webContents.setZoomFactor(factor);
+      if (!contentView) return;
+      contentView.webContents.setZoomFactor(factor);
       store.set('zoomFactor', factor);
     },
     onConnectTo: (url) => loadServer(url),
@@ -252,6 +307,8 @@ function createTray() {
     });
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Show Musicarr', click: () => mainWindow && mainWindow.show() },
+      { label: 'Switch server…', click: () => showConnectScreen() },
+      { label: 'Check for Updates…', click: () => checkForUpdates({ silent: false }) },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
     ]));
@@ -262,9 +319,10 @@ function createTray() {
 }
 
 // ---------------------------------------------------------------------------
-// IPC — the only privileged surface exposed to the (local) connect screen
+// IPC
 // ---------------------------------------------------------------------------
 
+// Server config bridge (used by the connect screen).
 ipcMain.handle('servers:list', () => ({
   servers: store.get('servers') || [],
   current: store.get('currentServer') || null,
@@ -282,6 +340,17 @@ ipcMain.handle('servers:forget', (_event, url) => {
   store.forgetServer(url);
   return { servers: store.get('servers') || [], current: store.get('currentServer') || null };
 });
+
+// Title bar bridge: window controls + in-app "Switch server".
+ipcMain.on('chrome:minimize', () => mainWindow && mainWindow.minimize());
+ipcMain.on('chrome:maximize-toggle', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+ipcMain.on('chrome:close', () => mainWindow && mainWindow.close());
+ipcMain.on('chrome:switch-server', () => showConnectScreen());
+ipcMain.on('chrome:ready', () => updateTitlebar());
 
 // ---------------------------------------------------------------------------
 // App boot

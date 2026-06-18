@@ -29,14 +29,14 @@ On top of the web app it adds the things a browser tab can't:
 | Native feature | What it does |
 |---|---|
 | **Connect screen** | Pick/enter a server URL; validates it against the server's `/health` endpoint before connecting. |
-| **Multi-server** | Remembers recent servers; one-click reconnect and a **Server → Switch server** menu (`Ctrl+Shift+S`). |
+| **Multi-server** | Remembers recent servers; one-click reconnect, an in-app **Switch server** button in the title bar (`Ctrl+Shift+S`), and a tray entry. |
 | **Auto-reconnect** | Reopens your last server on launch (falls back to the picker if it's unreachable). |
 | **Auto-update** | Checks GitHub Releases, downloads new versions in the background (differential) and installs on restart — no re-downloading installers. |
 | **Persistent login** | Uses the same cookie session as the web app, kept in the app's own profile, so you stay signed in across restarts. |
 | **Media keys** | Hardware play/pause/next/previous keys drive playback via the web app's Media Session integration. |
 | **Window state** | Remembers window size/position and zoom level. |
-| **Tray icon** | Quick show/quit from the system tray. |
-| **Native menus** | Zoom, full-screen, reload, dev tools, external links open in your real browser. |
+| **Tray icon** | Quick show, switch server, check for updates and quit from the system tray. |
+| **Custom title bar** | Frameless window with a slim title bar: app name, current server, an in-app **Switch server** button and window controls — no clunky OS menu bar. External links open in your real browser. |
 
 ## How it works
 
@@ -49,8 +49,8 @@ On top of the web app it adds the things a browser tab can't:
 4. Everything else — search, downloads, streaming, playlists, listen-together —
    is the server doing the work; the desktop app is just the window.
 
-Switching servers (or signing into a different one) is **Server → Switch
-server** in the menu, or `Ctrl+Shift+S`.
+Switching servers (or signing into a different one) is the **Switch server**
+button in the title bar, the tray menu, or `Ctrl+Shift+S`.
 
 ## Auto-update
 
