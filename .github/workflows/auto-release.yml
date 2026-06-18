@@ -1,0 +1,102 @@
+name: auto-release
+
+# Automatic, label-driven releases.
+#
+# When a pull request is merged into main, this workflow bumps the version in
+# package.json, commits + tags it, and builds & publishes the Windows installer
+# to a GitHub Release — no manual tagging needed.
+#
+# The bump level comes from a label on the PR:
+#   - "major"  -> X+1.0.0   (breaking changes)
+#   - "minor"  -> x.Y+1.0   (new features)
+#   - "patch"  -> x.y.Z+1   (fixes; this is also the default if no label is set)
+#   - "no-release" -> skip releasing entirely
+#
+# Note: a tag pushed by the built-in GITHUB_TOKEN does NOT trigger other
+# workflows (GitHub's anti-recursion rule), so this workflow does the whole job
+# itself (bump -> tag -> build -> release) instead of relying on release.yml.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    # Only on real merges, and only when not explicitly opted out.
+    if: >
+      github.event.pull_request.merged == true &&
+      !contains(github.event.pull_request.labels.*.name, 'no-release')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Pick bump level from PR labels
+        id: level
+        run: |
+          if [ "${{ contains(github.event.pull_request.labels.*.name, 'major') }}" = "true" ]; then
+            echo "level=major" >> "$GITHUB_OUTPUT"
+          elif [ "${{ contains(github.event.pull_request.labels.*.name, 'minor') }}" = "true" ]; then
+            echo "level=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version, commit & tag
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # npm version bumps package.json, makes a commit and an annotated tag.
+          # [skip ci] keeps the bump commit from re-triggering build.yml.
+          NEW_TAG=$(npm version ${{ steps.level.outputs.level }} -m "chore(release): %s [skip ci]")
+          echo "Bumped to $NEW_TAG (${{ steps.level.outputs.level }})"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main --follow-tags
+
+  release-windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci || npm install
+
+      - name: Build Windows installer
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish installer to a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Musicarr Desktop ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

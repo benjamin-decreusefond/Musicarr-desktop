@@ -97,10 +97,35 @@ Two workflows drive the build:
   so end users can download it straight from the
   [Releases](https://github.com/benjamin-decreusefond/Musicarr-desktop/releases)
   page (no Actions login required).
+- **`auto-release.yml`** — **fully automatic, label-driven releases**: when a PR
+  is merged into `main`, it bumps the version, tags it, and builds + publishes
+  the installer — no manual tagging at all (see below).
 
-### Releasing
+### Automatic releases on merge (recommended)
 
-Cut a new downloadable installer in two commands:
+Add **one** of these labels to a PR before merging it and a release is cut
+automatically when the PR lands on `main`:
+
+| PR label | Version bump | Use for |
+|---|---|---|
+| `major` | `X+1.0.0` | breaking changes |
+| `minor` | `x.Y+1.0` | new features |
+| `patch` | `x.y.Z+1` | fixes (also the **default** if no label is set) |
+| `no-release` | — | skip releasing for this PR |
+
+On merge, `auto-release.yml` bumps `package.json`, commits + tags `vX.Y.Z`, then
+builds `Musicarr-Setup-<version>.exe` and publishes the GitHub Release. A tag
+pushed by CI's `GITHUB_TOKEN` can't trigger another workflow, so this one does
+the build itself rather than handing off to `release.yml`.
+
+> One-time setup: make sure the `major` / `minor` / `patch` (and optional
+> `no-release`) **labels exist** in the repo (Issues → Labels), and that `main`
+> allows the Actions bot to push the bump commit (no branch protection blocking
+> it, or an exception for `github-actions[bot]`).
+
+### Manual releasing
+
+If you'd rather tag by hand (no label needed), `release.yml` still works:
 
 ```bash
 npm version patch          # bumps package.json (1.0.0 -> 1.0.1) and creates the git tag
@@ -112,8 +137,8 @@ git push --follow-tags     # pushes the commit + tag; the tag triggers release.y
 named after the tag, with auto-generated release notes. You can also run the
 workflow manually from the **Actions** tab and supply a tag.
 
-> It uses the built-in `GITHUB_TOKEN`, so no extra secrets are needed for
-> releasing. (Code-signing the installer would require your own certificate; the
+> All release workflows use the built-in `GITHUB_TOKEN`, so no extra secrets are
+> needed. (Code-signing the installer would require your own certificate; the
 > unsigned installer triggers a one-time Windows SmartScreen prompt.)
 
 ## Requirements
