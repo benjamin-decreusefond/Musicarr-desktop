@@ -3,6 +3,17 @@
 A native **Windows** (and macOS/Linux) desktop client for a self-hosted
 [Musicarr](https://github.com/benjamin-decreusefond/musicarr) server.
 
+## Download & install (Windows)
+
+Grab the latest installer from the
+[**Releases**](https://github.com/benjamin-decreusefond/Musicarr-desktop/releases/latest)
+page — download `Musicarr-Setup-<version>.exe`, run it, then launch **Musicarr**
+and enter your server address. That's the whole setup.
+
+The installer is a standard NSIS wizard (choose install location, desktop/start-menu
+shortcuts). Each release is built automatically by CI — see
+[Releasing](#releasing) below.
+
 Musicarr Desktop does **nothing on its own** — it has no Deezer, Soulseek/slskd
 or database logic of its own. It is a thin, hardened [Electron](https://www.electronjs.org/)
 shell that connects to a Musicarr **web server** you run and presents that
@@ -74,8 +85,36 @@ npm run pack         # unpacked build for quick local testing
 App/installer icons are optional and live in [`build/`](./build/README.md); the
 build works out of the box with Electron's default icon until you add your own.
 
-CI (`.github/workflows/build.yml`) lints on every push/PR and builds the
-Windows installer on `windows-latest`, uploading it as a workflow artifact.
+## CI & releasing
+
+Two workflows drive the build:
+
+- **`build.yml`** — runs on every push/PR: lints the sources and builds the
+  Windows installer on `windows-latest`, uploading it as a workflow **artifact**
+  (handy for testing a branch).
+- **`release.yml`** — runs when you push a **version tag** (`v*`) or trigger it
+  manually: builds the installer and publishes it to a public **GitHub Release**
+  so end users can download it straight from the
+  [Releases](https://github.com/benjamin-decreusefond/Musicarr-desktop/releases)
+  page (no Actions login required).
+
+### Releasing
+
+Cut a new downloadable installer in two commands:
+
+```bash
+npm version patch          # bumps package.json (1.0.0 -> 1.0.1) and creates the git tag
+git push --follow-tags     # pushes the commit + tag; the tag triggers release.yml
+```
+
+`release.yml` then builds `Musicarr-Setup-<version>.exe` and attaches it (plus
+`latest.yml`/`.blockmap` for future auto-update support) to a GitHub Release
+named after the tag, with auto-generated release notes. You can also run the
+workflow manually from the **Actions** tab and supply a tag.
+
+> It uses the built-in `GITHUB_TOKEN`, so no extra secrets are needed for
+> releasing. (Code-signing the installer would require your own certificate; the
+> unsigned installer triggers a one-time Windows SmartScreen prompt.)
 
 ## Requirements
 
