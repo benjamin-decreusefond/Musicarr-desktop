@@ -57,15 +57,10 @@ html, body {
 .logo {
   width: 48px;
   height: 48px;
-  border-radius: 14px;
-  background: var(--accent);
-  color: var(--accent-ink);
   display: grid;
   place-items: center;
-  font-weight: 800;
-  font-size: 26px;
-  letter-spacing: -1px;
 }
+.logo svg { display: block; }
 
 .brand-text h1 { margin: 0; font-size: 22px; letter-spacing: -0.5px; }
 .brand-text p { margin: 2px 0 0; color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 2px; }
