@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/titlebar-preload.js && node --check src/menu.js && node --check src/store.js && node --check src/updater.js && node --check src/renderer/connect.js && node --check src/renderer/titlebar.js",
+    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/titlebar-preload.js && node --check src/settings-preload.js && node --check src/menu.js && node --check src/store.js && node --check src/updater.js && node --check src/renderer/connect.js && node --check src/renderer/titlebar.js && node --check src/renderer/settings.js",
     "icons": "node build/generate-icons.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --publish never",

@@ -7,7 +7,7 @@
 const { Menu, shell, dialog } = require('electron');
 
 function buildAppMenu(ctx) {
-  const { app, window, store, isConnected, onDisconnect, onReload, onZoom, onConnectTo, onCheckForUpdates } = ctx;
+  const { app, window, store, isConnected, onDisconnect, onReload, onZoom, onConnectTo, onOpenSettings, onCheckForUpdates } = ctx;
   const isMac = process.platform === 'darwin';
 
   const recents = (store.get('servers') || []).map((s) => ({
@@ -22,6 +22,12 @@ function buildAppMenu(ctx) {
     {
       label: 'Server',
       submenu: [
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => { if (onOpenSettings) onOpenSettings(); },
+        },
+        { type: 'separator' },
         {
           label: 'Switch server…',
           accelerator: 'CmdOrCtrl+Shift+S',

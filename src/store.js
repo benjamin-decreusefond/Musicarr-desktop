@@ -17,6 +17,12 @@ const DEFAULTS = {
   windowBounds: null,
   // Persisted zoom factor for the web content.
   zoomFactor: 1,
+  // When the window is closed, keep the app running in the tray instead of
+  // quitting — re-open it from the tray icon. Off by default (closing quits).
+  minimizeToTray: false,
+  // Start hidden in the tray when the app is launched at login (only takes
+  // effect together with the OS "launch at login" setting).
+  startMinimized: false,
 };
 
 class Store {
