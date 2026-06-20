@@ -35,7 +35,8 @@ On top of the web app it adds the things a browser tab can't:
 | **Persistent login** | Uses the same cookie session as the web app, kept in the app's own profile, so you stay signed in across restarts. |
 | **Media keys** | Hardware play/pause/next/previous keys drive playback via the web app's Media Session integration. |
 | **Window state** | Remembers window size/position and zoom level. |
-| **Tray icon** | Quick show, switch server, check for updates and quit from the system tray. |
+| **Settings** | A **Settings** window (gear in the title bar, tray menu, or `Ctrl/Cmd+,`) to **launch at login**, **start hidden in the tray**, and **keep running in the tray when the window is closed**. |
+| **Tray icon** | Quick show, switch server, open settings, check for updates and quit from the system tray. |
 | **Custom title bar** | Frameless window with a slim title bar: app name, current server, an in-app **Switch server** button and window controls — no clunky OS menu bar. External links open in your real browser. |
 
 ## How it works

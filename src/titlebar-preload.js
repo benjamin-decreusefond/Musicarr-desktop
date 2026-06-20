@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('musicarrChrome', {
   toggleMaximize: () => ipcRenderer.send('chrome:maximize-toggle'),
   close: () => ipcRenderer.send('chrome:close'),
   switchServer: () => ipcRenderer.send('chrome:switch-server'),
+  openSettings: () => ipcRenderer.send('chrome:open-settings'),
   // Ask main to push the current state (used on first paint).
   requestState: () => ipcRenderer.send('chrome:ready'),
   // { connected, host, maximized }

@@ -7,6 +7,7 @@ const api = window.musicarrChrome;
 
 const switchBtn = document.getElementById('switch');
 const hostEl = document.getElementById('host');
+const settingsBtn = document.getElementById('settings');
 const minBtn = document.getElementById('min');
 const maxBtn = document.getElementById('max');
 const maxIcon = document.getElementById('maxIcon');
@@ -24,6 +25,7 @@ minBtn.addEventListener('click', () => api.minimize());
 maxBtn.addEventListener('click', () => api.toggleMaximize());
 closeBtn.addEventListener('click', () => api.close());
 switchBtn.addEventListener('click', () => api.switchServer());
+settingsBtn.addEventListener('click', () => api.openSettings());
 // Double-clicking the empty drag area maximizes/restores, like a native bar.
 dragEl.addEventListener('dblclick', () => api.toggleMaximize());
 

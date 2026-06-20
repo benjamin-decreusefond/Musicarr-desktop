@@ -20,17 +20,24 @@ const { initAutoUpdates, checkForUpdates } = require('./updater');
 
 const CONNECT_PAGE = path.join(__dirname, 'renderer', 'connect.html');
 const TITLEBAR_PAGE = path.join(__dirname, 'renderer', 'titlebar.html');
+const SETTINGS_PAGE = path.join(__dirname, 'renderer', 'settings.html');
 const PRELOAD = path.join(__dirname, 'preload.js');
 const TITLEBAR_PRELOAD = path.join(__dirname, 'titlebar-preload.js');
+const SETTINGS_PRELOAD = path.join(__dirname, 'settings-preload.js');
 const HEALTH_TIMEOUT_MS = 8000;
 const TITLEBAR_H = 36;
 
 let store;
-let mainWindow = null;   // frameless window; its webContents = the title bar
-let contentView = null;  // WebContentsView holding the connect screen / server app
+let mainWindow = null;     // frameless window; its webContents = the title bar
+let contentView = null;    // WebContentsView holding the connect screen / server app
+let settingsWindow = null; // small native dialog for desktop preferences
 let tray = null;
 // The origin we currently consider "in-app". Null while on the connect screen.
 let currentOrigin = null;
+// Set on a real quit so the close-to-tray handler lets the window actually close.
+let isQuitting = false;
+// True when this launch was started hidden (auto-start at login + "start hidden").
+let startHidden = process.argv.includes('--hidden');
 
 // ---------------------------------------------------------------------------
 // URL helpers
@@ -160,7 +167,21 @@ function createWindow() {
     openExternalIfSafe(url);
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  // Show the window unless we were auto-started hidden (launch-at-login +
+  // "start hidden in the tray"); in that case stay in the tray until summoned.
+  mainWindow.once('ready-to-show', () => {
+    if (startHidden) { startHidden = false; return; }
+    mainWindow.show();
+  });
+
+  // "Keep running in the tray when closed": intercept the close and hide instead
+  // of quitting, unless we're really quitting or there's no tray to restore from.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && store.get('minimizeToTray') && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   // Persist size/position so we reopen where the user left off; keep the content
   // view sized to fill the area below the title bar.
@@ -263,6 +284,76 @@ function updateTitlebar() {
 }
 
 // ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+// Electron can only manage the OS "open at login" entry on Windows and macOS;
+// on Linux it's left to the desktop environment.
+const CAN_LAUNCH_AT_LOGIN = process.platform === 'darwin' || process.platform === 'win32';
+
+// The OS is the source of truth for launch-at-login; the tray/window behaviours
+// live in our own config. Bundle them into one shape for the Settings UI.
+function getSettings() {
+  return {
+    launchAtLogin: CAN_LAUNCH_AT_LOGIN ? app.getLoginItemSettings().openAtLogin : false,
+    startMinimized: !!store.get('startMinimized'),
+    minimizeToTray: !!store.get('minimizeToTray'),
+    canLaunchAtLogin: CAN_LAUNCH_AT_LOGIN,
+  };
+}
+
+// Apply a partial settings update and return the resulting full settings.
+function setSettings(partial = {}) {
+  if (typeof partial.minimizeToTray === 'boolean') store.set('minimizeToTray', partial.minimizeToTray);
+  if (typeof partial.startMinimized === 'boolean') store.set('startMinimized', partial.startMinimized);
+
+  if (CAN_LAUNCH_AT_LOGIN) {
+    // Keep the registered login item in sync with both the on/off choice and the
+    // "start hidden" flag. We pass the hidden flag two ways so each platform can
+    // honour it: openAsHidden (macOS) and a --hidden arg we read on boot (Windows).
+    const openAtLogin = typeof partial.launchAtLogin === 'boolean'
+      ? partial.launchAtLogin
+      : app.getLoginItemSettings().openAtLogin;
+    const hidden = !!store.get('startMinimized');
+    app.setLoginItemSettings({ openAtLogin, openAsHidden: hidden, args: hidden ? ['--hidden'] : [] });
+  }
+
+  refreshMenu();
+  return getSettings();
+}
+
+function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+  settingsWindow = new BrowserWindow({
+    width: 480,
+    height: 470,
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: 'Musicarr Settings',
+    backgroundColor: '#0b0c10',
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      preload: SETTINGS_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  settingsWindow.loadFile(SETTINGS_PAGE);
+  settingsWindow.once('ready-to-show', () => settingsWindow.show());
+  settingsWindow.setWindowOpenHandler(() => ({ action: 'deny' }));
+  settingsWindow.on('closed', () => { settingsWindow = null; });
+}
+
+// ---------------------------------------------------------------------------
 // Menu / tray wiring
 // ---------------------------------------------------------------------------
 
@@ -283,6 +374,7 @@ function refreshMenu() {
       store.set('zoomFactor', factor);
     },
     onConnectTo: (url) => loadServer(url),
+    onOpenSettings: () => openSettingsWindow(),
     onCheckForUpdates: () => checkForUpdates({ silent: false }),
   });
   Menu.setApplicationMenu(menu);
@@ -308,6 +400,7 @@ function createTray() {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Show Musicarr', click: () => mainWindow && mainWindow.show() },
       { label: 'Switch server…', click: () => showConnectScreen() },
+      { label: 'Settings…', click: () => openSettingsWindow() },
       { label: 'Check for Updates…', click: () => checkForUpdates({ silent: false }) },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() },
@@ -341,7 +434,11 @@ ipcMain.handle('servers:forget', (_event, url) => {
   return { servers: store.get('servers') || [], current: store.get('currentServer') || null };
 });
 
-// Title bar bridge: window controls + in-app "Switch server".
+// Desktop preferences bridge (used by the Settings window).
+ipcMain.handle('settings:get', () => getSettings());
+ipcMain.handle('settings:set', (_event, partial) => setSettings(partial || {}));
+
+// Title bar bridge: window controls + in-app "Switch server" / "Settings".
 ipcMain.on('chrome:minimize', () => mainWindow && mainWindow.minimize());
 ipcMain.on('chrome:maximize-toggle', () => {
   if (!mainWindow) return;
@@ -350,6 +447,7 @@ ipcMain.on('chrome:maximize-toggle', () => {
 });
 ipcMain.on('chrome:close', () => mainWindow && mainWindow.close());
 ipcMain.on('chrome:switch-server', () => showConnectScreen());
+ipcMain.on('chrome:open-settings', () => openSettingsWindow());
 ipcMain.on('chrome:ready', () => updateTitlebar());
 
 // ---------------------------------------------------------------------------
@@ -367,6 +465,10 @@ if (!gotLock) {
       mainWindow.focus();
     }
   });
+
+  // Mark a real quit so the close-to-tray handler stops intercepting and lets
+  // every window close.
+  app.on('before-quit', () => { isQuitting = true; });
 
   app.whenReady().then(() => {
     store = new Store();
