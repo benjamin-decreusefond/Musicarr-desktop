@@ -1,6 +1,6 @@
 {
   "name": "musicarr-desktop",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Desktop client for a self-hosted Musicarr music server. Connects to a remote Musicarr server and exposes its full web experience in a native window with media-key, tray and multi-server support.",
   "author": "benjamin-decreusefond",
   "license": "MIT",
