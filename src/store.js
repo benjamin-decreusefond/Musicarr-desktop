@@ -23,6 +23,10 @@ const DEFAULTS = {
   // Start hidden in the tray when the app is launched at login (only takes
   // effect together with the OS "launch at login" setting).
   startMinimized: false,
+  // Whether the app registers itself to launch at login. We keep this as the
+  // source of truth and apply it to the OS, because reading it back from the OS
+  // is unreliable on Windows once a launch arg (--hidden) is registered.
+  launchAtLogin: false,
 };
 
 class Store {
