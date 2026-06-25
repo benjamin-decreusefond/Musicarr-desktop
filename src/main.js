@@ -291,33 +291,40 @@ function updateTitlebar() {
 // on Linux it's left to the desktop environment.
 const CAN_LAUNCH_AT_LOGIN = process.platform === 'darwin' || process.platform === 'win32';
 
-// The OS is the source of truth for launch-at-login; the tray/window behaviours
-// live in our own config. Bundle them into one shape for the Settings UI.
+// Our own config is the source of truth for all three toggles. We deliberately
+// do NOT read launch-at-login back from the OS: on Windows, once the login item
+// is registered with a launch arg (--hidden), app.getLoginItemSettings() called
+// without that same arg fails to match and reports the item as disabled — which
+// previously made enabling "start hidden" silently turn launch-at-login off and
+// left the toggle stuck. So we store the choice and only ever write it to the OS.
 function getSettings() {
   return {
-    launchAtLogin: CAN_LAUNCH_AT_LOGIN ? app.getLoginItemSettings().openAtLogin : false,
+    launchAtLogin: CAN_LAUNCH_AT_LOGIN ? !!store.get('launchAtLogin') : false,
     startMinimized: !!store.get('startMinimized'),
     minimizeToTray: !!store.get('minimizeToTray'),
     canLaunchAtLogin: CAN_LAUNCH_AT_LOGIN,
   };
 }
 
+// Register/unregister the OS login item from our stored preferences. The
+// "start hidden" flag is passed two ways so each platform can honour it:
+// openAsHidden (macOS) and a --hidden launch arg we read on boot (Windows).
+function applyLoginItem() {
+  if (!CAN_LAUNCH_AT_LOGIN) return;
+  const hidden = !!store.get('startMinimized');
+  app.setLoginItemSettings({
+    openAtLogin: !!store.get('launchAtLogin'),
+    openAsHidden: hidden,
+    args: hidden ? ['--hidden'] : [],
+  });
+}
+
 // Apply a partial settings update and return the resulting full settings.
 function setSettings(partial = {}) {
   if (typeof partial.minimizeToTray === 'boolean') store.set('minimizeToTray', partial.minimizeToTray);
   if (typeof partial.startMinimized === 'boolean') store.set('startMinimized', partial.startMinimized);
-
-  if (CAN_LAUNCH_AT_LOGIN) {
-    // Keep the registered login item in sync with both the on/off choice and the
-    // "start hidden" flag. We pass the hidden flag two ways so each platform can
-    // honour it: openAsHidden (macOS) and a --hidden arg we read on boot (Windows).
-    const openAtLogin = typeof partial.launchAtLogin === 'boolean'
-      ? partial.launchAtLogin
-      : app.getLoginItemSettings().openAtLogin;
-    const hidden = !!store.get('startMinimized');
-    app.setLoginItemSettings({ openAtLogin, openAsHidden: hidden, args: hidden ? ['--hidden'] : [] });
-  }
-
+  if (typeof partial.launchAtLogin === 'boolean') store.set('launchAtLogin', partial.launchAtLogin);
+  applyLoginItem();
   refreshMenu();
   return getSettings();
 }
@@ -473,6 +480,14 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     store = new Store();
+    // Reconcile our stored launch-at-login with the OS once on boot, reading with
+    // the same args we register (so the read is reliable on Windows). This migrates
+    // users who enabled it before this was stored, and picks up changes made in the
+    // OS startup settings.
+    if (CAN_LAUNCH_AT_LOGIN) {
+      const hidden = !!store.get('startMinimized');
+      store.set('launchAtLogin', app.getLoginItemSettings({ args: hidden ? ['--hidden'] : [] }).openAtLogin);
+    }
     createWindow();
     refreshMenu();
     createTray();
