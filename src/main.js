@@ -349,7 +349,8 @@ function openSettingsWindow() {
   });
   settingsWindow.loadFile(SETTINGS_PAGE);
   settingsWindow.once('ready-to-show', () => settingsWindow.show());
-  settingsWindow.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // setWindowOpenHandler lives on webContents, not the BrowserWindow.
+  settingsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   settingsWindow.on('closed', () => { settingsWindow = null; });
 }
 
