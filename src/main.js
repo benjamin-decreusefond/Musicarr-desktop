@@ -13,7 +13,7 @@
 // app content below it, so the title bar never overlaps the web UI.
 
 const path = require('path');
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, net, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, net, Tray, Menu, nativeImage, screen } = require('electron');
 const { Store } = require('./store');
 const { buildAppMenu } = require('./menu');
 const { initAutoUpdates, checkForUpdates } = require('./updater');
@@ -106,13 +106,29 @@ function testServer(rawUrl) {
 // Window lifecycle
 // ---------------------------------------------------------------------------
 
+// Saved window bounds, but only if a meaningful part of them still falls on a
+// currently-connected display. This is what makes multi-monitor restore work:
+// without the check, stale/off-screen coordinates get clamped back onto the
+// primary screen (or the wrong monitor under mixed DPI).
+function savedWindowBounds() {
+  const b = store.get('windowBounds');
+  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number' || !b.width || !b.height) return null;
+  const visible = screen.getAllDisplays().some((d) => {
+    const wa = d.workArea;
+    const ox = Math.min(b.x + b.width, wa.x + wa.width) - Math.max(b.x, wa.x);
+    const oy = Math.min(b.y + b.height, wa.y + wa.height) - Math.max(b.y, wa.y);
+    return ox > 0 && oy > 0 && ox * oy > 0.3 * b.width * b.height; // ~30% on-screen
+  });
+  return visible ? b : null;
+}
+
 function createWindow() {
-  const bounds = store.get('windowBounds') || {};
+  const saved = savedWindowBounds();
   mainWindow = new BrowserWindow({
-    width: bounds.width || 1180,
-    height: bounds.height || 800,
-    x: bounds.x,
-    y: bounds.y,
+    width: saved ? saved.width : 1180,
+    height: saved ? saved.height : 800,
+    x: saved ? saved.x : undefined,
+    y: saved ? saved.y : undefined,
     minWidth: 720,
     minHeight: 540,
     backgroundColor: '#0b0c10',
@@ -127,6 +143,12 @@ function createWindow() {
       sandbox: true,
     },
   });
+
+  // Re-assert the exact saved position after construction — setBounds places the
+  // window reliably across monitors with different DPI, where constructor x/y can
+  // land on the wrong screen. Then restore the maximized state.
+  if (saved) mainWindow.setBounds({ x: saved.x, y: saved.y, width: saved.width, height: saved.height });
+  if (store.get('windowMaximized')) mainWindow.maximize();
 
   // The title bar lives in the window's root webContents.
   mainWindow.loadFile(TITLEBAR_PAGE);
@@ -183,17 +205,18 @@ function createWindow() {
     }
   });
 
-  // Persist size/position so we reopen where the user left off; keep the content
-  // view sized to fill the area below the title bar.
+  // Persist size/position so we reopen where the user left off. Only store the
+  // *windowed* bounds (skip while maximized/minimized) so the restore size is the
+  // un-maximized size; the maximized state is tracked separately.
   const persistBounds = () => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized() && !mainWindow.isMaximized()) {
       store.set('windowBounds', mainWindow.getBounds());
     }
   };
   mainWindow.on('resize', () => { layout(); persistBounds(); });
   mainWindow.on('move', persistBounds);
-  mainWindow.on('maximize', () => updateTitlebar());
-  mainWindow.on('unmaximize', () => updateTitlebar());
+  mainWindow.on('maximize', () => { store.set('windowMaximized', true); updateTitlebar(); });
+  mainWindow.on('unmaximize', () => { store.set('windowMaximized', false); updateTitlebar(); });
   mainWindow.on('enter-full-screen', () => updateTitlebar());
   mainWindow.on('leave-full-screen', () => updateTitlebar());
 
@@ -389,9 +412,10 @@ function refreshMenu() {
 }
 
 function createTray() {
-  // A 1x1 transparent fallback keeps the tray functional even before a real
-  // icon asset is added under build/.
-  let image = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'tray.png'));
+  // Load the bundled tray icon (src/tray.png ships inside the app; build/ is
+  // buildResources and isn't packaged). A 1x1 transparent fallback keeps the
+  // tray functional if it's somehow missing.
+  let image = nativeImage.createFromPath(path.join(__dirname, 'tray.png'));
   if (image.isEmpty()) {
     image = nativeImage.createFromDataURL(
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
