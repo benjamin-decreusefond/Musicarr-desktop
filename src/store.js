@@ -15,6 +15,8 @@ const DEFAULTS = {
   servers: [],
   // Restored on next launch.
   windowBounds: null,
+  // Whether the window was maximized when last closed.
+  windowMaximized: false,
   // Persisted zoom factor for the web content.
   zoomFactor: 1,
   // When the window is closed, keep the app running in the tray instead of

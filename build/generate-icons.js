@@ -145,10 +145,15 @@ const outDir = __dirname;
 const icoSizes = [16, 32, 48, 64, 128, 256];
 
 fs.writeFileSync(path.join(outDir, 'icon.png'), pngFor(512));
-fs.writeFileSync(path.join(outDir, 'tray.png'), pngFor(32));
+// The tray icon must ship *inside* the app bundle (electron-builder's `files`
+// only includes src/ + package.json), so also write it to src/. build/ is the
+// buildResources dir and is not copied into the packaged app at runtime.
+const trayPng = pngFor(32);
+fs.writeFileSync(path.join(outDir, 'tray.png'), trayPng);
+fs.writeFileSync(path.join(outDir, '..', 'src', 'tray.png'), trayPng);
 fs.writeFileSync(
   path.join(outDir, 'icon.ico'),
   encodeICO(icoSizes.map((size) => ({ size, png: pngFor(size) })))
 );
 
-console.log('Wrote build/icon.png (512), build/tray.png (32), build/icon.ico (' + icoSizes.join(',') + ')');
+console.log('Wrote build/icon.png (512), build/tray.png + src/tray.png (32), build/icon.ico (' + icoSizes.join(',') + ')');
