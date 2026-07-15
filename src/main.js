@@ -26,6 +26,13 @@ const TITLEBAR_PRELOAD = path.join(__dirname, 'titlebar-preload.js');
 const SETTINGS_PRELOAD = path.join(__dirname, 'settings-preload.js');
 const HEALTH_TIMEOUT_MS = 8000;
 const TITLEBAR_H = 36;
+// How long after a display attach/detach/metrics change we distrust window
+// bounds events: right after one, moves/resizes are the OS reshuffling windows
+// (a detaching monitor yanks its windows onto the primary display), not the user.
+const DISPLAY_SETTLE_MS = 2000;
+// How long after login we keep waiting for the display that held the saved
+// bounds to show up before giving up on moving the window back to it.
+const DISPLAY_RETURN_WAIT_MS = 120000;
 
 let store;
 let mainWindow = null;     // frameless window; its webContents = the title bar
@@ -38,6 +45,8 @@ let currentOrigin = null;
 let isQuitting = false;
 // True when this launch was started hidden (auto-start at login + "start hidden").
 let startHidden = process.argv.includes('--hidden');
+// Timestamp of the last display topology change (see DISPLAY_SETTLE_MS).
+let displaysChangedAt = 0;
 
 // ---------------------------------------------------------------------------
 // URL helpers
@@ -106,29 +115,51 @@ function testServer(rawUrl) {
 // Window lifecycle
 // ---------------------------------------------------------------------------
 
-// Saved window bounds, but only if a meaningful part of them still falls on a
-// currently-connected display. This is what makes multi-monitor restore work:
-// without the check, stale/off-screen coordinates get clamped back onto the
-// primary screen (or the wrong monitor under mixed DPI).
-function savedWindowBounds() {
-  const b = store.get('windowBounds');
-  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number' || !b.width || !b.height) return null;
-  const visible = screen.getAllDisplays().some((d) => {
+// True when a meaningful part of the given bounds (~30% of the area) falls on
+// a currently-connected display. Guards against placing the window at
+// coordinates on a monitor that isn't attached.
+function boundsOnSomeDisplay(b) {
+  return screen.getAllDisplays().some((d) => {
     const wa = d.workArea;
     const ox = Math.min(b.x + b.width, wa.x + wa.width) - Math.max(b.x, wa.x);
     const oy = Math.min(b.y + b.height, wa.y + wa.height) - Math.max(b.y, wa.y);
-    return ox > 0 && oy > 0 && ox * oy > 0.3 * b.width * b.height; // ~30% on-screen
+    return ox > 0 && oy > 0 && ox * oy > 0.3 * b.width * b.height;
   });
-  return visible ? b : null;
+}
+
+// Saved window bounds plus whether they currently fall on a connected display.
+// Displays can enumerate seconds late during OS login (DisplayPort monitors
+// especially), so "not visible right now" does not mean the bounds are stale —
+// the caller keeps the size either way and re-applies the position once the
+// missing display shows up.
+function savedWindowState() {
+  const b = store.get('windowBounds');
+  if (!b || typeof b.x !== 'number' || typeof b.y !== 'number' || !b.width || !b.height) {
+    return { bounds: null, visible: false };
+  }
+  return { bounds: b, visible: boundsOnSomeDisplay(b) };
 }
 
 function createWindow() {
-  const saved = savedWindowBounds();
+  const saved = savedWindowState();
+
+  // Window-state persistence bookkeeping for this window (wired up below).
+  let pendingRestore = null;   // saved state waiting for its display to reappear
+  let stopDisplayWatch = null; // tears down the display-added watcher
+  let programmaticUntil = 0;   // ignore bounds events we caused ourselves
+  let persistTimer = null;
+  // Bounds changes we trigger (initial placement, deferred restore, maximize
+  // restore) emit the same move/resize events as a user drag; a short
+  // suppression window keeps them from being treated as user intent.
+  const markProgrammatic = () => { programmaticUntil = Date.now() + 1000; };
+
   mainWindow = new BrowserWindow({
-    width: saved ? saved.width : 1180,
-    height: saved ? saved.height : 800,
-    x: saved ? saved.x : undefined,
-    y: saved ? saved.y : undefined,
+    // Keep the saved size even when the saved position can't be used right now
+    // (its display may simply not be enumerated yet this early after login).
+    width: saved.bounds ? saved.bounds.width : 1180,
+    height: saved.bounds ? saved.bounds.height : 800,
+    x: saved.visible ? saved.bounds.x : undefined,
+    y: saved.visible ? saved.bounds.y : undefined,
     minWidth: 720,
     minHeight: 540,
     backgroundColor: '#0b0c10',
@@ -147,8 +178,42 @@ function createWindow() {
   // Re-assert the exact saved position after construction — setBounds places the
   // window reliably across monitors with different DPI, where constructor x/y can
   // land on the wrong screen. Then restore the maximized state.
-  if (saved) mainWindow.setBounds({ x: saved.x, y: saved.y, width: saved.width, height: saved.height });
+  markProgrammatic();
+  if (saved.visible) {
+    mainWindow.setBounds({ x: saved.bounds.x, y: saved.bounds.y, width: saved.bounds.width, height: saved.bounds.height });
+  }
   if (store.get('windowMaximized')) mainWindow.maximize();
+
+  // If the saved bounds sit on a display that isn't connected right now, don't
+  // discard them: after a reboot the app can start before every monitor has
+  // enumerated. Stay centered on the primary display for the moment and move
+  // the window back the moment its display appears.
+  if (saved.bounds && !saved.visible) {
+    pendingRestore = { bounds: saved.bounds, maximized: !!store.get('windowMaximized') };
+    const tryRestore = () => {
+      if (!pendingRestore || !mainWindow || mainWindow.isDestroyed()) return;
+      if (!boundsOnSomeDisplay(pendingRestore.bounds)) return;
+      const { bounds, maximized } = pendingRestore;
+      stopDisplayWatch();
+      markProgrammatic();
+      if (mainWindow.isMaximized()) mainWindow.unmaximize();
+      mainWindow.setBounds(bounds);
+      if (maximized) mainWindow.maximize();
+    };
+    // Give the OS a beat to finish work-area/DPI reshuffling after a display
+    // change before measuring against the new layout.
+    const onDisplaysChanged = () => setTimeout(tryRestore, 500);
+    screen.on('display-added', onDisplaysChanged);
+    screen.on('display-metrics-changed', onDisplaysChanged);
+    const giveUp = setTimeout(() => { if (stopDisplayWatch) stopDisplayWatch(); }, DISPLAY_RETURN_WAIT_MS);
+    stopDisplayWatch = () => {
+      pendingRestore = null;
+      clearTimeout(giveUp);
+      screen.removeListener('display-added', onDisplaysChanged);
+      screen.removeListener('display-metrics-changed', onDisplaysChanged);
+      stopDisplayWatch = null;
+    };
+  }
 
   // The title bar lives in the window's root webContents.
   mainWindow.loadFile(TITLEBAR_PAGE);
@@ -207,20 +272,46 @@ function createWindow() {
 
   // Persist size/position so we reopen where the user left off. Only store the
   // *windowed* bounds (skip while maximized/minimized) so the restore size is the
-  // un-maximized size; the maximized state is tracked separately.
+  // un-maximized size; the maximized state is tracked separately. Persistence
+  // is skipped whenever the change didn't come from the user: our own
+  // programmatic placement, the window shuffle the OS does when a monitor
+  // detaches (that one used to overwrite the real bounds with primary-screen
+  // coordinates right before a reboot), and the startup fallback position while
+  // a deferred restore is still waiting for its display to come back.
   const persistBounds = () => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized() && !mainWindow.isMaximized()) {
-      store.set('windowBounds', mainWindow.getBounds());
-    }
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized() || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+    if (pendingRestore) return;
+    if (Date.now() - displaysChangedAt < DISPLAY_SETTLE_MS) return;
+    const bounds = mainWindow.getBounds();
+    if (!boundsOnSomeDisplay(bounds)) return;
+    store.set('windowBounds', bounds);
   };
-  mainWindow.on('resize', () => { layout(); persistBounds(); });
-  mainWindow.on('move', persistBounds);
-  mainWindow.on('maximize', () => { store.set('windowMaximized', true); updateTitlebar(); });
-  mainWindow.on('unmaximize', () => { store.set('windowMaximized', false); updateTitlebar(); });
+  const onBoundsChanged = () => {
+    const now = Date.now();
+    if (now < programmaticUntil) return;
+    if (now - displaysChangedAt < DISPLAY_SETTLE_MS) return;
+    // A real user move/resize takes over from any pending display restore.
+    if (stopDisplayWatch) stopDisplayWatch();
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistBounds, 400);
+  };
+  mainWindow.on('resize', () => { layout(); onBoundsChanged(); });
+  mainWindow.on('move', onBoundsChanged);
+  mainWindow.on('maximize', () => {
+    if (Date.now() >= programmaticUntil) store.set('windowMaximized', true);
+    updateTitlebar();
+  });
+  mainWindow.on('unmaximize', () => {
+    if (Date.now() >= programmaticUntil) store.set('windowMaximized', false);
+    updateTitlebar();
+  });
   mainWindow.on('enter-full-screen', () => updateTitlebar());
   mainWindow.on('leave-full-screen', () => updateTitlebar());
 
   mainWindow.on('closed', () => {
+    clearTimeout(persistTimer);
+    if (stopDisplayWatch) stopDisplayWatch();
     mainWindow = null;
     contentView = null;
   });
@@ -512,6 +603,11 @@ if (!gotLock) {
       const hidden = !!store.get('startMinimized');
       store.set('launchAtLogin', app.getLoginItemSettings({ args: hidden ? ['--hidden'] : [] }).openAtLogin);
     }
+    // Track display topology changes: window bounds events shortly after one
+    // are the OS reshuffling windows, not the user (see persistBounds).
+    ['display-added', 'display-removed', 'display-metrics-changed'].forEach((ev) => {
+      screen.on(ev, () => { displaysChangedAt = Date.now(); });
+    });
     createWindow();
     refreshMenu();
     createTray();
