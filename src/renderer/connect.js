@@ -6,7 +6,8 @@
 const form = document.getElementById('connect-form');
 const input = document.getElementById('server');
 const button = document.getElementById('connect-btn');
-const status = document.getElementById('status');
+// Not `status`: that would shadow the global `window.status`.
+const statusEl = document.getElementById('status');
 const banner = document.getElementById('banner');
 const recentsBox = document.getElementById('recents');
 const recentsList = document.getElementById('recents-list');
@@ -22,8 +23,8 @@ function showStartupBanner() {
 }
 
 function setStatus(text, isError) {
-  status.textContent = text || '';
-  status.classList.toggle('error', !!isError);
+  statusEl.textContent = text || '';
+  statusEl.classList.toggle('error', !!isError);
 }
 
 function setBusy(busy) {

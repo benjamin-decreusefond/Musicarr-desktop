@@ -13,8 +13,10 @@
 // app content below it, so the title bar never overlaps the web UI.
 
 const path = require('path');
-const { app, BrowserWindow, WebContentsView, ipcMain, shell, net, Tray, Menu, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, shell, net, session, Tray, Menu, nativeImage, screen } = require('electron');
 const { Store } = require('./store');
+const urls = require('./urls');
+const { normalizeServerUrl } = urls;
 const { buildAppMenu } = require('./menu');
 const { initAutoUpdates, checkForUpdates } = require('./updater');
 
@@ -52,23 +54,12 @@ let displaysChangedAt = 0;
 // URL helpers
 // ---------------------------------------------------------------------------
 
-// Accept what a human types ("musicarr.example.com", "http://192.168.1.5:8686/")
-// and return a clean scheme://host[:port] origin, or throw on garbage.
-function normalizeServerUrl(raw) {
-  if (!raw || typeof raw !== 'string') throw new Error('Enter a server address');
-  let value = raw.trim();
-  if (!value) throw new Error('Enter a server address');
-  if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error('That doesn\'t look like a valid address');
-  }
-  if (!url.hostname) throw new Error('That doesn\'t look like a valid address');
-  // Keep only the origin — paths/queries are irrelevant for a server root.
-  return url.origin;
-}
+// The set of local pages the content view is ever allowed to sit on. Anything
+// loaded there shares PRELOAD and therefore gets `window.musicarr`, which is
+// why this is an exact-path allowlist rather than a `file://` scheme test.
+const LOCAL_PAGES = [CONNECT_PAGE];
+
+const isInAppUrl = (url) => urls.isInAppUrl(url, { currentOrigin, allowedPages: LOCAL_PAGES });
 
 // Probe a candidate server's unauthenticated /health liveness endpoint.
 function testServer(rawUrl) {
@@ -377,14 +368,8 @@ function hostLabel(origin) {
   try { return new URL(origin).host; } catch { return origin; }
 }
 
-function isInAppUrl(url) {
-  if (url.startsWith('file://')) return true; // the local connect screen
-  if (!currentOrigin) return false;
-  try { return new URL(url).origin === currentOrigin; } catch { return false; }
-}
-
 function openExternalIfSafe(url) {
-  if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+  if (urls.isExternallyOpenable(url)) shell.openExternal(url).catch(() => {});
 }
 
 // Push the current connection/window state to the title bar renderer.
@@ -574,6 +559,36 @@ ipcMain.on('chrome:open-settings', () => openSettingsWindow());
 ipcMain.on('chrome:ready', () => updateTitlebar());
 
 // ---------------------------------------------------------------------------
+// Permissions
+// ---------------------------------------------------------------------------
+
+// The content view renders a remote server's web app, which is untrusted code
+// running with our app's identity. Electron grants permission requests by
+// default, so a page could ask for the microphone, camera or geolocation and
+// get it with no prompt the user would recognize. Musicarr's UI is a music
+// player: it needs none of these, so deny everything except the handful that
+// are inert and genuinely useful to a player.
+const ALLOWED_PERMISSIONS = new Set([
+  'fullscreen',   // full-screen album art / now-playing view
+  'clipboard-sanitized-write', // "copy share link" buttons
+]);
+
+function applyPermissionPolicy() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission));
+  });
+  // The request handler covers prompts; this one covers the synchronous checks
+  // some APIs make without ever raising a request.
+  ses.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission));
+  // Nothing in this app uses <webview>; refuse to attach one rather than let a
+  // remote page spawn a frame we never hardened.
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('will-attach-webview', (event) => event.preventDefault());
+  });
+}
+
+// ---------------------------------------------------------------------------
 // App boot
 // ---------------------------------------------------------------------------
 
@@ -595,6 +610,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     store = new Store();
+    applyPermissionPolicy();
     // Reconcile our stored launch-at-login with the OS once on boot, reading with
     // the same args we register (so the read is reliable on Windows). This migrates
     // users who enabled it before this was stored, and picks up changes made in the
