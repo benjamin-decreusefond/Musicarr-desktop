@@ -8,11 +8,12 @@ const api = window.musicarrSettings;
 const launchAtLogin = document.getElementById('launchAtLogin');
 const startMinimized = document.getElementById('startMinimized');
 const minimizeToTray = document.getElementById('minimizeToTray');
-const status = document.getElementById('status');
+// Not `status`: that would shadow the global `window.status`.
+const statusEl = document.getElementById('status');
 
 function setStatus(text, isError) {
-  status.textContent = text || '';
-  status.classList.toggle('error', !!isError);
+  statusEl.textContent = text || '';
+  statusEl.classList.toggle('error', !!isError);
 }
 
 // Reflect the canonical settings (read back from the main process) into the UI.

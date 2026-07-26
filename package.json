@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "lint": "node --check src/main.js && node --check src/preload.js && node --check src/titlebar-preload.js && node --check src/settings-preload.js && node --check src/menu.js && node --check src/store.js && node --check src/updater.js && node --check src/renderer/connect.js && node --check src/renderer/titlebar.js && node --check src/renderer/settings.js",
+    "lint": "eslint src/ build/ test/",
+    "test": "node --test test/*.test.js",
     "icons": "node build/generate-icons.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --publish never",
@@ -18,8 +19,11 @@
     "dist:linux": "electron-builder --linux --publish never"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "electron": "^31.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "eslint": "^9.39.4",
+    "globals": "^17.6.0"
   },
   "build": {
     "appId": "ovh.bigbossben.musicarr.desktop",

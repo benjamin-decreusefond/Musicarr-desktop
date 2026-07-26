@@ -15,8 +15,10 @@ jobs:
         with:
           node-version: 20
       - run: npm ci || npm install
-      - name: Syntax-check the main/preload/renderer sources
+      - name: Lint
         run: npm run lint
+      - name: Unit tests
+        run: npm test
 
   build-windows:
     needs: lint
