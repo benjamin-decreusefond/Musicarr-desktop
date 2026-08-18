@@ -19,6 +19,9 @@ let initialized = false;
 // "you're up to date" / error dialogs that we'd stay silent about for the
 // automatic background checks.
 let manualCheck = false;
+// True between "install the downloaded update" and the app actually quitting, so
+// the 'error' handler can tell a failed silent install apart from a failed check.
+let installing = false;
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
@@ -58,6 +61,27 @@ function setupHandlers() {
 
   autoUpdater.on('error', (err) => {
     console.error('[updater]', err);
+    if (installing) {
+      // The silent installer could not be launched (locked file, AV, missing
+      // elevation…). Fall back to the visible installer rather than leaving the
+      // user on an old version with no way forward.
+      installing = false;
+      manualCheck = false;
+      dialog
+        .showMessageBox(activeWindow(), {
+          type: 'error',
+          title: 'Update failed',
+          message: 'The update could not be installed automatically.',
+          detail: `${String((err && err.message) || err)}\n\nYou can run the installer manually instead.`,
+          buttons: ['Run installer', 'Later'],
+          defaultId: 0,
+          cancelId: 1,
+        })
+        .then(({ response }) => {
+          if (response === 0) setImmediate(() => autoUpdater.quitAndInstall(false, true));
+        });
+      return;
+    }
     if (manualCheck) {
       manualCheck = false;
       dialog.showMessageBox(activeWindow(), {
@@ -84,9 +108,26 @@ function setupHandlers() {
     });
     if (response === 0) {
       // Give the dialog a tick to close before the app quits to install.
-      setImmediate(() => autoUpdater.quitAndInstall());
+      setImmediate(installUpdate);
     }
   });
+}
+
+// Install the downloaded update in place, without showing the installer wizard.
+//
+// The NSIS build is an assisted installer (it asks for an install directory on
+// first install), so quitAndInstall() with its defaults would replay that whole
+// wizard on every update. quitAndInstall(isSilent, isForceRunAfter) instead runs
+// the installer with /S: it reads InstallLocation from the registry, so it
+// upgrades the existing installation — same directory, same shortcuts, no
+// questions — and --force-run relaunches the app once it's done (a silent
+// install doesn't restart the app on its own).
+//
+// isSilent is Windows-only; on macOS/Linux electron-updater ignores it and its
+// own in-place update path applies.
+function installUpdate() {
+  installing = true;
+  autoUpdater.quitAndInstall(true, true);
 }
 
 // Wire up handlers and kick off the first check + a periodic timer.
