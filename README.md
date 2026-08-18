@@ -62,8 +62,14 @@ Powered by [`electron-updater`](https://www.electron.build/auto-update):
   version (anonymously — the repo is public), reading the `latest.yml` the
   release workflow publishes.
 - A new version downloads in the background, **differentially** (only the changed
-  blocks, via the `.blockmap`), then prompts **Restart now / Later**. On restart
-  it installs silently — no NSIS wizard.
+  blocks, via the `.blockmap`), then prompts **Restart now / Later**.
+- Installing is **silent**: the update runs the NSIS installer with `/S`, so it
+  upgrades the existing installation in place — no wizard, no install-directory
+  question — and relaunches the app when it's done. Choosing **Later** applies
+  the same silent install the next time you quit. The install-directory prompt
+  only ever appears on a first, manual install.
+- If the silent install can't start (locked file, antivirus, elevation), the app
+  says so and offers to run the installer visibly instead.
 - You can also trigger a check from **Help → Check for Updates…**.
 
 Auto-update only runs in the installed app; in dev (`npm start`) it's a no-op.
