@@ -3,7 +3,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { normalizeServerUrl, isLocalPage, isInAppUrl, isExternallyOpenable } = require('../src/urls');
+const {
+  normalizeServerUrl, isLocalPage, isInAppUrl, isExternallyOpenable,
+  rememberAuthOrigin, MAX_AUTH_ORIGINS,
+} = require('../src/urls');
 
 const CONNECT_PAGE = path.join(__dirname, '..', 'src', 'renderer', 'connect.html');
 const PAGES = [CONNECT_PAGE];
@@ -78,4 +81,46 @@ test('isExternallyOpenable hands only http(s) links to the OS browser', () => {
   assert.equal(isExternallyOpenable('javascript:alert(1)'), false);
   assert.equal(isExternallyOpenable('ms-settings:'), false);
   assert.equal(isExternallyOpenable(undefined), false);
+});
+
+test('isInAppUrl allows an identity provider the server redirected us to', () => {
+  const authOrigins = new Set();
+  const opts = { currentOrigin: 'https://music.example.com', allowedPages: PAGES, authOrigins };
+  // Nothing remembered yet: the provider is still "out".
+  assert.equal(isInAppUrl('https://sso.example.com/realms/media/login', opts), false);
+  // The server's own redirect chain is what puts it in.
+  assert.equal(rememberAuthOrigin(authOrigins, 'https://sso.example.com/auth?client_id=x', 'https://music.example.com'), true);
+  assert.equal(isInAppUrl('https://sso.example.com/realms/media/login', opts), true);
+  // Only that origin — not a neighbour, and not a scheme downgrade of it.
+  assert.equal(isInAppUrl('https://evil.example.com/', opts), false);
+  assert.equal(isInAppUrl('http://sso.example.com/', opts), false);
+  // Still no reaching local files through the allowance.
+  assert.equal(isInAppUrl('file:///etc/passwd', opts), false);
+});
+
+test('isInAppUrl ignores remembered origins once disconnected', () => {
+  const authOrigins = new Set(['https://sso.example.com']);
+  assert.equal(isInAppUrl('https://sso.example.com/', { currentOrigin: null, allowedPages: PAGES, authOrigins }), false);
+});
+
+test('rememberAuthOrigin only records http(s) origins, and only while connected', () => {
+  const authOrigins = new Set();
+  assert.equal(rememberAuthOrigin(authOrigins, 'https://sso.example.com/', null), false);
+  assert.equal(rememberAuthOrigin(authOrigins, 'file:///etc/passwd', 'https://music.example.com'), false);
+  assert.equal(rememberAuthOrigin(authOrigins, 'javascript:alert(1)', 'https://music.example.com'), false);
+  assert.equal(rememberAuthOrigin(authOrigins, 'not a url', 'https://music.example.com'), false);
+  // The server's own origin needs no remembering.
+  assert.equal(rememberAuthOrigin(authOrigins, 'https://music.example.com/library', 'https://music.example.com'), false);
+  assert.equal(authOrigins.size, 0);
+});
+
+test('rememberAuthOrigin is bounded so a redirect loop cannot grow it forever', () => {
+  const authOrigins = new Set();
+  for (let i = 0; i < MAX_AUTH_ORIGINS; i++) {
+    assert.equal(rememberAuthOrigin(authOrigins, `https://sso${i}.example.com/`, 'https://music.example.com'), true);
+  }
+  assert.equal(rememberAuthOrigin(authOrigins, 'https://one-too-many.example.com/', 'https://music.example.com'), false);
+  // An origin already in the set is still accepted once full.
+  assert.equal(rememberAuthOrigin(authOrigins, 'https://sso0.example.com/callback', 'https://music.example.com'), true);
+  assert.equal(authOrigins.size, MAX_AUTH_ORIGINS);
 });

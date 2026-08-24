@@ -64,17 +64,59 @@ function isLocalPage(url, allowedPages, platform = process.platform) {
   );
 }
 
-/** Whether navigating to `url` keeps us inside the app (local page or the
- *  connected server's own origin). `currentOrigin` may be null on the
- *  connect screen. */
-function isInAppUrl(url, { currentOrigin, allowedPages, platform }) {
+/** The origin of `url`, but only when it is one the content view could
+ *  legitimately be navigated to: http(s) and nothing else, so no redirect can
+ *  park it on `file:` or fire a registered custom-scheme handler. */
+function httpOrigin(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+// How many identity-provider origins one sign-in may accumulate. A federated
+// login legitimately chains a couple of hops (proxy -> Keycloak -> upstream
+// IdP); a redirect loop must not grow the set without bound.
+const MAX_AUTH_ORIGINS = 8;
+
+/** Remember `url`'s origin as part of a sign-in the connected server started.
+ *
+ *  A server that delegates authentication to an external identity provider
+ *  (oauth2-proxy in front of Keycloak/Authentik/Authelia, or built-in OIDC)
+ *  answers with a redirect to that provider, which then needs to run its own
+ *  login pages — and set its own cookies — before redirecting back. Those pages
+ *  are on a foreign origin, so without this they'd be treated as "leaving the
+ *  app" and pushed to the system browser, where the provider's just-set login
+ *  cookie doesn't exist.
+ *
+ *  Only origins we arrived at by following the server's own redirects are
+ *  recorded, and only while connected. Returns true when the origin is (now)
+ *  allowed. */
+function rememberAuthOrigin(authOrigins, url, currentOrigin) {
+  if (!authOrigins || !currentOrigin) return false;
+  const origin = httpOrigin(url);
+  if (!origin || origin === currentOrigin) return false;
+  if (authOrigins.has(origin)) return true;
+  if (authOrigins.size >= MAX_AUTH_ORIGINS) return false;
+  authOrigins.add(origin);
+  return true;
+}
+
+/** Whether navigating to `url` keeps us inside the app: one of our own local
+ *  pages, the connected server's origin, or an identity provider that server
+ *  redirected us to for an in-progress sign-in (see rememberAuthOrigin).
+ *  `currentOrigin` may be null on the connect screen — nothing remote is
+ *  in-app there. */
+function isInAppUrl(url, { currentOrigin, allowedPages, authOrigins, platform }) {
   if (isLocalPage(url, allowedPages, platform)) return true;
   if (!currentOrigin) return false;
-  try {
-    return new URL(url).origin === currentOrigin;
-  } catch {
-    return false;
-  }
+  const origin = httpOrigin(url);
+  if (!origin) return false;
+  if (origin === currentOrigin) return true;
+  return !!authOrigins && authOrigins.has(origin);
 }
 
 /** Only ever hand http(s) links to the OS browser — never file:, and never a
@@ -83,4 +125,7 @@ function isExternallyOpenable(url) {
   return typeof url === 'string' && /^https?:\/\//i.test(url);
 }
 
-module.exports = { normalizeServerUrl, isLocalPage, isInAppUrl, isExternallyOpenable };
+module.exports = {
+  normalizeServerUrl, isLocalPage, isInAppUrl, isExternallyOpenable,
+  httpOrigin, rememberAuthOrigin, MAX_AUTH_ORIGINS,
+};

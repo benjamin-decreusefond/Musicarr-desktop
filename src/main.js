@@ -43,6 +43,10 @@ let settingsWindow = null; // small native dialog for desktop preferences
 let tray = null;
 // The origin we currently consider "in-app". Null while on the connect screen.
 let currentOrigin = null;
+// Identity-provider origins the connected server redirected us to for a sign-in
+// still in progress. Emptied on connect/disconnect and once we land back on the
+// server. See urls.rememberAuthOrigin.
+const authOrigins = new Set();
 // Set on a real quit so the close-to-tray handler lets the window actually close.
 let isQuitting = false;
 // True when this launch was started hidden (auto-start at login + "start hidden").
@@ -59,7 +63,7 @@ let displaysChangedAt = 0;
 // why this is an exact-path allowlist rather than a `file://` scheme test.
 const LOCAL_PAGES = [CONNECT_PAGE];
 
-const isInAppUrl = (url) => urls.isInAppUrl(url, { currentOrigin, allowedPages: LOCAL_PAGES });
+const isInAppUrl = (url) => urls.isInAppUrl(url, { currentOrigin, allowedPages: LOCAL_PAGES, authOrigins });
 
 // Probe a candidate server's unauthenticated /health liveness endpoint.
 function testServer(rawUrl) {
@@ -244,6 +248,20 @@ function createWindow() {
     event.preventDefault();
     openExternalIfSafe(url);
   });
+  // Server-side redirects don't fire `will-navigate`, so a server that hands
+  // sign-in to an external identity provider (oauth2-proxy/Keycloak/Authentik…)
+  // used to land us on the provider's login page and *then* bounce its form
+  // submit — the first renderer-initiated navigation — to the system browser,
+  // which has none of the cookies the provider just set ("Restart login cookie
+  // not found"). Following the redirect chain here keeps the whole flow in-app.
+  cv.on('will-redirect', (_event, url, _isInPlace, isMainFrame) => {
+    if (isMainFrame !== false) urls.rememberAuthOrigin(authOrigins, url, currentOrigin);
+  });
+  // Back on the server itself: the sign-in is over, so stop treating the
+  // provider's origins as in-app.
+  cv.on('did-navigate', (_event, url) => {
+    if (currentOrigin && urls.httpOrigin(url) === currentOrigin) authOrigins.clear();
+  });
 
   // Show the window unless we were auto-started hidden (launch-at-login +
   // "start hidden in the tray"); in that case stay in the tray until summoned.
@@ -333,6 +351,7 @@ async function bootstrap() {
 
 function showConnectScreen(message) {
   currentOrigin = null;
+  authOrigins.clear();
   if (!contentView) return;
   const query = message ? `?message=${encodeURIComponent(message)}` : '';
   contentView.webContents.loadFile(CONNECT_PAGE, query ? { search: query } : undefined);
@@ -350,6 +369,7 @@ function loadServer(rawUrl) {
     return;
   }
   currentOrigin = origin;
+  authOrigins.clear();
   store.rememberServer(origin, hostLabel(origin));
   contentView.webContents.loadURL(origin);
   if (mainWindow) mainWindow.setTitle(`Musicarr — ${hostLabel(origin)}`);
@@ -524,20 +544,38 @@ function createTray() {
 // ---------------------------------------------------------------------------
 
 // Server config bridge (used by the connect screen).
-ipcMain.handle('servers:list', () => ({
+//
+// Everything the content view loads shares PRELOAD, so `window.musicarr` is
+// reachable from the server's own web app — and, during a sign-in, from the
+// identity provider's pages too. This bridge decides which origin the app
+// loads and what sits in the recents list, so only answer our own connect
+// screen: remote content has no business driving it.
+function fromConnectScreen(event) {
+  let url = '';
+  try { url = event.senderFrame?.url || ''; } catch { return false; } // frame already gone
+  return urls.isLocalPage(url, LOCAL_PAGES);
+}
+
+const noServers = () => ({ servers: [], current: null });
+
+ipcMain.handle('servers:list', (event) => (fromConnectScreen(event) ? {
   servers: store.get('servers') || [],
   current: store.get('currentServer') || null,
-}));
+} : noServers()));
 
-ipcMain.handle('servers:test', async (_event, url) => testServer(url));
+ipcMain.handle('servers:test', async (event, url) => (
+  fromConnectScreen(event) ? testServer(url) : { ok: false, error: 'Not allowed' }
+));
 
-ipcMain.handle('servers:connect', async (_event, url) => {
+ipcMain.handle('servers:connect', async (event, url) => {
+  if (!fromConnectScreen(event)) return { ok: false, error: 'Not allowed' };
   const result = await testServer(url);
   if (result.ok) loadServer(result.url);
   return result;
 });
 
-ipcMain.handle('servers:forget', (_event, url) => {
+ipcMain.handle('servers:forget', (event, url) => {
+  if (!fromConnectScreen(event)) return noServers();
   store.forgetServer(url);
   return { servers: store.get('servers') || [], current: store.get('currentServer') || null };
 });

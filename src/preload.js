@@ -4,6 +4,9 @@
 // renderer and the main process. It exposes a deliberately tiny, non-privileged
 // API (server discovery/connect) — no fs, no shell, no Node — so that even the
 // remote server web app, which shares this preload, gains nothing dangerous.
+// The `servers:*` handlers additionally check the calling frame in the main
+// process and only answer our own connect screen, so remote content can neither
+// read the recents list nor point the app at another origin.
 
 const { contextBridge, ipcRenderer } = require('electron');
 
